@@ -1,0 +1,116 @@
+// Prisma 7 schema — PostgreSQL.
+// The datasource URL lives in prisma.config.ts (Prisma 7 no longer reads it here).
+
+generator client {
+  provider     = "prisma-client"
+  output       = "../src/generated/prisma"
+  moduleFormat = "esm"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+/* --------------------------------- enums ---------------------------------- */
+
+enum PostStatus {
+  published
+  draft
+}
+
+enum UserRole {
+  admin
+  writer
+}
+
+enum TechCategory {
+  framework
+  data
+  style
+  tool
+}
+
+enum TechRing {
+  adopt
+  trial
+  assess
+  hold
+}
+
+/* --------------------------------- models --------------------------------- */
+
+model User {
+  id           String    @id @default(cuid())
+  name         String
+  username     String    @unique
+  email        String    @unique
+  passwordHash String
+  role         UserRole  @default(writer)
+  bio          String    @default("")
+  createdAt    DateTime  @default(now())
+  posts        Post[]
+  sessions     Session[]
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  tokenHash String   @unique
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+  expiresAt DateTime
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+model Post {
+  id          String     @id @default(cuid())
+  slug        String     @unique
+  title       String
+  excerpt     String
+  content     String
+  tags        String[]   @default([])
+  seriesTitle String?
+  seriesOrder Int?
+  status      PostStatus @default(draft)
+  featured    Boolean    @default(false)
+  publishedAt DateTime   @default(now())
+  readingTime Int        @default(0)
+  views       Int        @default(0)
+  claps       Int        @default(0)
+  authorId    String?
+  author      User?      @relation(fields: [authorId], references: [id], onDelete: SetNull)
+  // Denormalised author snapshot: the byline survives renames and account deletion.
+  authorName     String?
+  authorUsername String?
+
+  @@index([status, publishedAt(sort: Desc)])
+  @@index([authorId, status])
+}
+
+model Project {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  tagline   String
+  year      Int
+  tech      String[] @default([])
+  url       String?
+  highlight String   @default("")
+
+  @@index([year(sort: Desc)])
+}
+
+model Tech {
+  id       String       @id @default(cuid())
+  name     String       @unique
+  category TechCategory
+  ring     TechRing
+  note     String       @default("")
+}
+
+model Subscriber {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  createdAt DateTime @default(now())
+}

@@ -1,22 +1,23 @@
 import { NextResponse } from "next/server";
-import { getDb, dbMode } from "@/lib/mongodb";
+import { Prisma } from "@/generated/prisma/client";
+import { getDb } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
 
 export async function GET() {
   const started = Date.now();
-  let db: { status: string; latencyMs?: number; mode?: string } = { status: "unknown" };
+  let db: { status: string; latencyMs?: number } = { status: "unknown" };
   try {
-    const conn = await getDb();
-    await conn.command({ ping: 1 });
-    db = { status: "ok", latencyMs: Date.now() - started, mode: dbMode() };
-  } catch (err) {
+    const client = await getDb();
+    await client.$queryRaw(Prisma.sql`SELECT 1`);
+    db = { status: "ok", latencyMs: Date.now() - started };
+  } catch {
     db = { status: "error" };
   }
   return NextResponse.json({
-    ok: true,
+    ok: db.status === "ok",
     service: "sanidev-weblog",
-    database: "mongodb",
+    database: "postgresql",
     db,
     time: new Date().toISOString(),
   });

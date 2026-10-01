@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 import { KeyRound } from "lucide-react";
 import { getCurrentUser } from "@/lib/auth";
 import { LoginForm } from "@/components/auth/AuthForms";
-import { DYNAMIC_ADMIN_EMAIL } from "@/lib/seed/admin";
+import { ADMIN_EMAIL, ADMIN_PASSWORD, WRITER_EMAIL, WRITER_PASSWORD } from "@/lib/seed/accounts";
 
 export const dynamic = "force-dynamic";
 
@@ -32,14 +32,24 @@ export default async function LoginPage({
         <LoginForm next={next && next.startsWith("/") ? next : "/studio"} />
       </div>
 
-      <div className="mt-6 rounded-2xl border border-dashed border-line p-4 text-center">
-        <p className="font-mono text-[10px] uppercase tracking-widest text-faint" dir="ltr">demo account</p>
-        <p className="mt-1.5 text-xs text-mute">
-          حساب مدیر (سانی):{" "}
-          <span className="font-mono text-ember-2" dir="ltr">{DYNAMIC_ADMIN_EMAIL}</span> /{" "}
-          <span className="font-mono text-ember-2" dir="ltr">sani1234</span>
-        </p>
-      </div>
+      {/* Never print credentials in a production build. */}
+      {process.env.NODE_ENV !== "production" ? (
+        <div className="mt-6 rounded-2xl border border-dashed border-line p-4 text-center">
+          <p className="font-mono text-[10px] uppercase tracking-widest text-faint" dir="ltr">
+            seeded test accounts
+          </p>
+          <p className="mt-1.5 text-xs text-mute">
+            مدیر:{" "}
+            <span className="font-mono text-ember-2" dir="ltr">{ADMIN_EMAIL}</span> /{" "}
+            <span className="font-mono text-ember-2" dir="ltr">{ADMIN_PASSWORD}</span>
+          </p>
+          <p className="mt-1 text-xs text-mute">
+            نویسنده:{" "}
+            <span className="font-mono text-ember-2" dir="ltr">{WRITER_EMAIL}</span> /{" "}
+            <span className="font-mono text-ember-2" dir="ltr">{WRITER_PASSWORD}</span>
+          </p>
+        </div>
+      ) : null}
     </div>
   );
 }

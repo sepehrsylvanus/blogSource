@@ -1,11 +1,22 @@
-import type { PostDoc } from "@/lib/types";
+import type { Prisma, PostStatus } from "@/generated/prisma/client";
 import { readingTimeFa } from "@/lib/markdown";
-import { ADMIN_ID, ADMIN_AUTHOR } from "./admin";
+import type { Series } from "@/lib/types";
+import { ADMIN_AUTHOR, ADMIN_ID } from "./accounts";
 
 const day = 86_400_000;
 const ago = (days: number) => new Date(Date.now() - days * day);
 
-type RawPost = Omit<PostDoc, "_id" | "readingTime" | "publishedAt" | "authorId" | "author"> & {
+type RawPost = {
+  slug: string;
+  title: string;
+  excerpt: string;
+  content: string;
+  tags: string[];
+  series: Series | null;
+  status: PostStatus;
+  featured: boolean;
+  views: number;
+  claps: number;
   daysAgo: number;
 };
 
@@ -514,10 +525,13 @@ export default async function PostPage({ params }) {
   },
 ];
 
-export const seedPosts: Omit<PostDoc, "_id">[] = rawPosts.map(({ daysAgo, ...post }) => ({
+export const seedPosts: Prisma.PostCreateManyInput[] = rawPosts.map(({ daysAgo, series, ...post }) => ({
   ...post,
+  seriesTitle: series?.title ?? null,
+  seriesOrder: series?.order ?? null,
   publishedAt: ago(daysAgo),
   readingTime: readingTimeFa(post.content),
   authorId: ADMIN_ID,
-  author: { ...ADMIN_AUTHOR },
+  authorName: ADMIN_AUTHOR.name,
+  authorUsername: ADMIN_AUTHOR.username,
 }));

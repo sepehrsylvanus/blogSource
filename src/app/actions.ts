@@ -93,7 +93,7 @@ export async function registerAction(_prev: AuthState, formData: FormData): Prom
     email: data.email,
     passwordHash: hashPassword(data.password),
   });
-  await createSession(user._id);
+  await createSession(user.id);
   redirect("/studio?welcome=1");
 }
 
@@ -117,7 +117,7 @@ export async function loginAction(_prev: AuthState, formData: FormData): Promise
     return { status: "error", message: "ایمیل یا رمز اشتباه است" };
   }
 
-  await createSession(user._id!);
+  await createSession(user.id);
   const next = formData.get("next");
   redirect(typeof next === "string" && next.startsWith("/") ? next : "/studio");
 }

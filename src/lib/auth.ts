@@ -2,9 +2,9 @@ import { cache } from "react";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { createHash, randomBytes } from "node:crypto";
-import type { ObjectId } from "mongodb";
-import { getDb } from "./mongodb";
-import type { PublicUser, SessionDoc, UserDoc } from "./types";
+import type { User as UserRow } from "@/generated/prisma/client";
+import { getDb } from "./db";
+import type { PublicUser } from "./types";
 
 export const SESSION_COOKIE = "sd_session";
 const SESSION_DAYS = 30;
@@ -13,22 +13,29 @@ function sha256(input: string): string {
   return createHash("sha256").update(input).digest("hex");
 }
 
+function toPublicUser(user: UserRow): PublicUser {
+  return {
+    id: user.id,
+    name: user.name,
+    username: user.username,
+    role: user.role,
+    bio: user.bio,
+    createdAt: user.createdAt.toISOString(),
+  };
+}
+
 /**
- * Sessions are opaque 256-bit tokens. Only the SHA-256 hash is persisted,
- * so a database dump does not leak live sessions. A TTL index on
- * `expiresAt` lets MongoDB reap expired sessions by itself.
+ * Sessions are opaque 256-bit tokens. Only the SHA-256 hash is persisted, so a
+ * database dump does not leak live sessions. PostgreSQL has no TTL index like
+ * MongoDB, so expired rows are reaped opportunistically on every new login.
  */
-export async function createSession(userId: ObjectId): Promise<void> {
+export async function createSession(userId: string): Promise<void> {
   const db = await getDb();
   const token = randomBytes(32).toString("base64url");
   const expiresAt = new Date(Date.now() + SESSION_DAYS * 86_400_000);
 
-  await db.collection<SessionDoc>("sessions").insertOne({
-    tokenHash: sha256(token),
-    userId,
-    createdAt: new Date(),
-    expiresAt,
-  });
+  await db.session.deleteMany({ where: { expiresAt: { lt: new Date() } } });
+  await db.session.create({ data: { tokenHash: sha256(token), userId, expiresAt } });
 
   const jar = await cookies();
   jar.set(SESSION_COOKIE, token, {
@@ -46,23 +53,13 @@ export const getCurrentUser = cache(async (): Promise<PublicUser | null> => {
   if (!token) return null;
 
   const db = await getDb();
-  const session = await db.collection<SessionDoc>("sessions").findOne({
-    tokenHash: sha256(token),
-    expiresAt: { $gt: new Date() },
+  const session = await db.session.findUnique({
+    where: { tokenHash: sha256(token) },
+    include: { user: true },
   });
-  if (!session) return null;
+  if (!session || session.expiresAt.getTime() <= Date.now()) return null;
 
-  const user = await db.collection<UserDoc>("users").findOne({ _id: session.userId });
-  if (!user) return null;
-
-  return {
-    id: user._id!.toString(),
-    name: user.name,
-    username: user.username,
-    role: user.role,
-    bio: user.bio,
-    createdAt: user.createdAt.toISOString(),
-  };
+  return toPublicUser(session.user);
 });
 
 export async function destroySession(): Promise<void> {
@@ -70,7 +67,7 @@ export async function destroySession(): Promise<void> {
   const token = jar.get(SESSION_COOKIE)?.value;
   if (token) {
     const db = await getDb();
-    await db.collection<SessionDoc>("sessions").deleteOne({ tokenHash: sha256(token) });
+    await db.session.deleteMany({ where: { tokenHash: sha256(token) } });
   }
   jar.delete(SESSION_COOKIE);
 }

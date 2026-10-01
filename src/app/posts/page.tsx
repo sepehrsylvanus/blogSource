@@ -9,7 +9,7 @@ export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
   title: "نوشته‌ها",
-  description: "همه‌ی نوشته‌های وبلاگ سانی‌.دِو — Next.js، MongoDB، ری‌اکت و طراحی وب.",
+  description: "همه‌ی نوشته‌های وبلاگ سانی‌.دِو — Next.js، PostgreSQL، ری‌اکت و طراحی وب.",
 };
 
 const sortOptions: { key: PostSort; label: string; icon: typeof Clock3 }[] = [

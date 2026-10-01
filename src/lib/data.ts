@@ -1,37 +1,80 @@
-import { ObjectId } from "mongodb";
 import { randomBytes } from "node:crypto";
-import { getDb } from "./mongodb";
+import { Prisma } from "@/generated/prisma/client";
+import type { Post as PostRow } from "@/generated/prisma/client";
+import { getDb } from "./db";
 import { escapeRegExp, extractHeadings, readingTimeFa, slugifyHeading } from "./markdown";
 import type {
   GraphEdge,
   GraphNode,
   Heading,
   Post,
-  PostDoc,
   PostInput,
   Project,
-  ProjectDoc,
   PublicUser,
   SearchResult,
-  TechDoc,
   TechUsage,
-  UserDoc,
 } from "./types";
 
-type DocWithId<T> = T & { _id: { toString(): string } };
-
-function toPost(doc: DocWithId<PostDoc>): Post {
+/** Flatten a Prisma row into the shape the UI consumes. */
+function toPost(row: PostRow): Post {
   return {
-    ...doc,
-    _id: doc._id.toString(),
-    authorId: doc.authorId ? doc.authorId.toString() : null,
-    publishedAt: doc.publishedAt.toISOString(),
+    id: row.id,
+    slug: row.slug,
+    title: row.title,
+    excerpt: row.excerpt,
+    content: row.content,
+    tags: row.tags,
+    series: row.seriesTitle ? { title: row.seriesTitle, order: row.seriesOrder ?? 0 } : null,
+    status: row.status,
+    featured: row.featured,
+    publishedAt: row.publishedAt.toISOString(),
+    readingTime: row.readingTime,
+    views: row.views,
+    claps: row.claps,
+    authorId: row.authorId,
+    author:
+      row.authorName && row.authorUsername
+        ? { name: row.authorName, username: row.authorUsername }
+        : null,
   };
+}
+
+function isNotFound(err: unknown): boolean {
+  return err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2025";
+}
+
+function isUniqueViolation(err: unknown): boolean {
+  return err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002";
+}
+
+/** Escape LIKE wildcards so a user query is matched literally. */
+function likePattern(query: string): string {
+  return `%${query.replace(/[\\%_]/g, (ch) => `\\${ch}`)}%`;
 }
 
 /* ---------------------------------- posts --------------------------------- */
 
 export type PostSort = "new" | "views" | "claps";
+
+/**
+ * Search across the four text fields.
+ *
+ * Kept in SQL for two reasons: Prisma's `contains` does not escape LIKE
+ * wildcards (`%`, `_`), and there is no substring filter for `String[]`.
+ * Both are handled here with an escaped pattern.
+ */
+async function slugsMatchingQuery(query: string): Promise<string[]> {
+  const db = await getDb();
+  const like = likePattern(query);
+  const rows = await db.$queryRaw<{ slug: string }[]>(Prisma.sql`
+    SELECT slug FROM "Post"
+    WHERE title ILIKE ${like}
+       OR excerpt ILIKE ${like}
+       OR content ILIKE ${like}
+       OR array_to_string(tags, ' ') ILIKE ${like}
+  `);
+  return rows.map((row) => row.slug);
+}
 
 export async function getPosts(opts?: {
   tag?: string;
@@ -40,34 +83,28 @@ export async function getPosts(opts?: {
   limit?: number;
 }): Promise<Post[]> {
   const db = await getDb();
-  const filter: Record<string, unknown> = { status: "published" };
-  if (opts?.tag) filter.tags = opts.tag;
-  if (opts?.q) {
-    const rx = new RegExp(escapeRegExp(opts.q), "i");
-    filter.$or = [{ title: rx }, { excerpt: rx }, { content: rx }, { tags: rx }];
-  }
-  const sort: Record<string, 1 | -1> =
-    opts?.sort === "views"
-      ? { views: -1 }
-      : opts?.sort === "claps"
-        ? { claps: -1 }
-        : { publishedAt: -1 };
+  const where: Prisma.PostWhereInput = { status: "published" };
 
-  const docs = (await db
-    .collection<PostDoc>("posts")
-    .find(filter)
-    .sort(sort)
-    .limit(opts?.limit ?? 50)
-    .toArray()) as DocWithId<PostDoc>[];
-  return docs.map(toPost);
+  if (opts?.tag) where.tags = { has: opts.tag };
+  if (opts?.q) {
+    where.slug = { in: await slugsMatchingQuery(opts.q.trim()) };
+  }
+
+  const orderBy: Prisma.PostOrderByWithRelationInput =
+    opts?.sort === "views"
+      ? { views: "desc" }
+      : opts?.sort === "claps"
+        ? { claps: "desc" }
+        : { publishedAt: "desc" };
+
+  const rows = await db.post.findMany({ where, orderBy, take: opts?.limit ?? 50 });
+  return rows.map(toPost);
 }
 
 export async function getPost(slug: string): Promise<Post | null> {
   const db = await getDb();
-  const doc = (await db
-    .collection<PostDoc>("posts")
-    .findOne({ slug, status: "published" })) as DocWithId<PostDoc> | null;
-  return doc ? toPost(doc) : null;
+  const row = await db.post.findFirst({ where: { slug, status: "published" } });
+  return row ? toPost(row) : null;
 }
 
 export async function getPostHeadings(slug: string): Promise<Heading[]> {
@@ -126,16 +163,13 @@ export async function getAdjacentPosts(post: Post): Promise<{ prev: Post | null;
 
 export async function getTags(): Promise<{ name: string; count: number }[]> {
   const db = await getDb();
-  const rows = await db
-    .collection("posts")
-    .aggregate<{ _id: string; count: number }>([
-      { $match: { status: "published" } },
-      { $unwind: "$tags" },
-      { $group: { _id: "$tags", count: { $sum: 1 } } },
-      { $sort: { count: -1 } },
-    ])
-    .toArray();
-  return rows.map((r) => ({ name: r._id, count: r.count }));
+  return db.$queryRaw<{ name: string; count: number }[]>(Prisma.sql`
+    SELECT tag AS name, COUNT(*)::int AS count
+    FROM "Post" p, unnest(p.tags) AS tag
+    WHERE p.status = 'published'
+    GROUP BY tag
+    ORDER BY count DESC, name ASC
+  `);
 }
 
 export async function getStats(): Promise<{
@@ -146,21 +180,20 @@ export async function getStats(): Promise<{
   projects: number;
 }> {
   const db = await getDb();
-  const [agg] = await db
-    .collection("posts")
-    .aggregate<{ posts: number; views: number; claps: number }>([
-      { $match: { status: "published" } },
-      { $group: { _id: null, posts: { $sum: 1 }, views: { $sum: "$views" }, claps: { $sum: "$claps" } } },
-    ])
-    .toArray();
-  const [tags, projects] = await Promise.all([
+  const [agg, tags, projects] = await Promise.all([
+    db.post.aggregate({
+      where: { status: "published" },
+      _count: { _all: true },
+      _sum: { views: true, claps: true },
+    }),
     getTags(),
-    db.collection("projects").estimatedDocumentCount(),
+    db.project.count(),
   ]);
+
   return {
-    posts: agg?.posts ?? 0,
-    views: agg?.views ?? 0,
-    claps: agg?.claps ?? 0,
+    posts: agg._count._all ?? 0,
+    views: agg._sum.views ?? 0,
+    claps: agg._sum.claps ?? 0,
     tags: tags.length,
     projects,
   };
@@ -185,19 +218,13 @@ export async function getSeries(): Promise<{ title: string; posts: Post[] }[]> {
 export async function getActivity(): Promise<{ date: string; count: number }[]> {
   const db = await getDb();
   const since = new Date(Date.now() - 26 * 7 * 86_400_000);
-  const rows = await db
-    .collection("posts")
-    .aggregate<{ _id: string; count: number }>([
-      { $match: { status: "published", publishedAt: { $gte: since } } },
-      {
-        $group: {
-          _id: { $dateToString: { format: "%Y-%m-%d", date: "$publishedAt" } },
-          count: { $sum: 1 },
-        },
-      },
-    ])
-    .toArray();
-  return rows.map((r) => ({ date: r._id, count: r.count }));
+  return db.$queryRaw<{ date: string; count: number }[]>(Prisma.sql`
+    SELECT to_char("publishedAt" AT TIME ZONE 'UTC', 'YYYY-MM-DD') AS date, COUNT(*)::int AS count
+    FROM "Post"
+    WHERE status = 'published' AND "publishedAt" >= ${since}
+    GROUP BY 1
+    ORDER BY 1 ASC
+  `);
 }
 
 /* ---------------------------------- graph --------------------------------- */
@@ -241,12 +268,7 @@ export async function getGraph(): Promise<{ nodes: GraphNode[]; edges: GraphEdge
 
 export async function getProjects(): Promise<Project[]> {
   const db = await getDb();
-  const docs = (await db
-    .collection<ProjectDoc>("projects")
-    .find({})
-    .sort({ year: -1 })
-    .toArray()) as DocWithId<ProjectDoc>[];
-  return docs.map((d) => ({ ...d, _id: d._id.toString() }));
+  return db.project.findMany({ orderBy: { year: "desc" } });
 }
 
 /**
@@ -256,16 +278,14 @@ export async function getProjects(): Promise<Project[]> {
  */
 export async function getTechUsage(): Promise<TechUsage[]> {
   const db = await getDb();
-  const techs = (await db.collection<TechDoc>("techs").find({}).toArray()) as DocWithId<TechDoc>[];
-
-  const projectUsage = await db
-    .collection<ProjectDoc>("projects")
-    .aggregate<{ tech: string; count: number; years: number[] }>([
-      { $unwind: "$tech" },
-      { $group: { _id: "$tech", count: { $sum: 1 }, years: { $addToSet: "$year" } } },
-      { $project: { _id: 0, tech: "$_id", count: 1, years: 1 } },
-    ])
-    .toArray();
+  const [techs, projectUsage] = await Promise.all([
+    db.tech.findMany(),
+    db.$queryRaw<{ tech: string; count: number; years: number[] }[]>(Prisma.sql`
+      SELECT t AS tech, COUNT(*)::int AS count, (array_agg(DISTINCT p.year))::int[] AS years
+      FROM "Project" p, unnest(p.tech) AS t
+      GROUP BY t
+    `),
+  ]);
   const usageMap = new Map(projectUsage.map((u) => [u.tech, u]));
 
   const posts = await getPosts({ limit: 50 });
@@ -286,7 +306,7 @@ export async function getTechUsage(): Promise<TechUsage[]> {
       ring: tech.ring,
       note: tech.note,
       projectCount: usage?.count ?? 0,
-      years: (usage?.years ?? []).sort((a, b) => b - a),
+      years: [...(usage?.years ?? [])].sort((a, b) => b - a),
       postCount: countMentions(tech.name),
     });
   }
@@ -299,7 +319,7 @@ export async function getTechUsage(): Promise<TechUsage[]> {
       ring: "trial",
       note: "",
       projectCount: usage.count,
-      years: usage.years.sort((a, b) => b - a),
+      years: [...usage.years].sort((a, b) => b - a),
       postCount: countMentions(name),
     });
   }
@@ -314,18 +334,9 @@ export async function searchAll(q: string): Promise<SearchResult[]> {
   if (query.length < 2) return [];
   const rx = new RegExp(escapeRegExp(query), "i");
 
-  const db = await getDb();
-  const docs = (await db
-    .collection<PostDoc>("posts")
-    .find({ status: "published", $or: [{ title: rx }, { excerpt: rx }, { content: rx }, { tags: rx }] })
-    .sort({ publishedAt: -1 })
-    .limit(6)
-    .project({ title: 1, slug: 1, tags: 1, excerpt: 1 })
-    .toArray()) as unknown as (Pick<PostDoc, "title" | "slug" | "tags" | "excerpt"> & {
-    _id: unknown;
-  })[];
+  const posts = await getPosts({ q: query, limit: 6 });
 
-  const results: SearchResult[] = docs.map((p) => ({
+  const results: SearchResult[] = posts.map((p) => ({
     type: "post",
     title: p.title,
     subtitle: p.tags.join(" · "),
@@ -358,27 +369,41 @@ export async function searchAll(q: string): Promise<SearchResult[]> {
 
 export async function incrementView(slug: string): Promise<number> {
   const db = await getDb();
-  const res = await db
-    .collection<PostDoc>("posts")
-    .findOneAndUpdate({ slug }, { $inc: { views: 1 } }, { returnDocument: "after" });
-  return res?.views ?? 0;
+  try {
+    const post = await db.post.update({
+      where: { slug },
+      data: { views: { increment: 1 } },
+      select: { views: true },
+    });
+    return post.views;
+  } catch (err) {
+    if (isNotFound(err)) return 0;
+    throw err;
+  }
 }
 
 export async function addClap(slug: string, amount = 1): Promise<number> {
   const db = await getDb();
-  const res = await db
-    .collection<PostDoc>("posts")
-    .findOneAndUpdate({ slug }, { $inc: { claps: amount } }, { returnDocument: "after" });
-  return res?.claps ?? 0;
+  try {
+    const post = await db.post.update({
+      where: { slug },
+      data: { claps: { increment: amount } },
+      select: { claps: true },
+    });
+    return post.claps;
+  } catch (err) {
+    if (isNotFound(err)) return 0;
+    throw err;
+  }
 }
 
 export async function addSubscriber(email: string): Promise<"ok" | "duplicate"> {
   const db = await getDb();
   try {
-    await db.collection("subscribers").insertOne({ email, createdAt: new Date() });
+    await db.subscriber.create({ data: { email } });
     return "ok";
   } catch (err) {
-    if ((err as { code?: number }).code === 11000) return "duplicate";
+    if (isUniqueViolation(err)) return "duplicate";
     throw err;
   }
 }
@@ -387,12 +412,12 @@ export async function addSubscriber(email: string): Promise<"ok" | "duplicate"> 
 
 export async function getUserByEmail(email: string) {
   const db = await getDb();
-  return db.collection<UserDoc>("users").findOne({ email: email.toLowerCase().trim() });
+  return db.user.findUnique({ where: { email: email.toLowerCase().trim() } });
 }
 
 export async function getUserByUsername(username: string) {
   const db = await getDb();
-  return db.collection<UserDoc>("users").findOne({ username: username.toLowerCase().trim() });
+  return db.user.findUnique({ where: { username: username.toLowerCase().trim() } });
 }
 
 export async function createUser(input: {
@@ -400,19 +425,18 @@ export async function createUser(input: {
   username: string;
   email: string;
   passwordHash: string;
-}): Promise<DocWithId<UserDoc>> {
+}) {
   const db = await getDb();
-  const doc: Omit<UserDoc, "_id"> = {
-    name: input.name,
-    username: input.username.toLowerCase().trim(),
-    email: input.email.toLowerCase().trim(),
-    passwordHash: input.passwordHash,
-    role: "writer",
-    bio: "",
-    createdAt: new Date(),
-  };
-  const res = await db.collection<UserDoc>("users").insertOne(doc);
-  return { ...doc, _id: res.insertedId };
+  return db.user.create({
+    data: {
+      name: input.name,
+      username: input.username.toLowerCase().trim(),
+      email: input.email.toLowerCase().trim(),
+      passwordHash: input.passwordHash,
+      role: "writer",
+      bio: "",
+    },
+  });
 }
 
 export async function getAuthorPublic(username: string): Promise<{
@@ -421,52 +445,50 @@ export async function getAuthorPublic(username: string): Promise<{
 } | null> {
   const user = await getUserByUsername(username);
   if (!user) return null;
+
   const db = await getDb();
-  const [agg] = await db
-    .collection("posts")
-    .aggregate<{ posts: number; views: number; claps: number }>([
-      { $match: { authorId: user._id, status: "published" } },
-      { $group: { _id: null, posts: { $sum: 1 }, views: { $sum: "$views" }, claps: { $sum: "$claps" } } },
-    ])
-    .toArray();
+  const agg = await db.post.aggregate({
+    where: { authorId: user.id, status: "published" },
+    _count: { _all: true },
+    _sum: { views: true, claps: true },
+  });
+
   return {
     user: {
-      id: user._id!.toString(),
+      id: user.id,
       name: user.name,
       username: user.username,
       role: user.role,
       bio: user.bio,
       createdAt: user.createdAt.toISOString(),
     },
-    stats: { posts: agg?.posts ?? 0, views: agg?.views ?? 0, claps: agg?.claps ?? 0 },
+    stats: {
+      posts: agg._count._all ?? 0,
+      views: agg._sum.views ?? 0,
+      claps: agg._sum.claps ?? 0,
+    },
   };
 }
 
 export async function getPostsByAuthor(authorId: string, includeDrafts = false): Promise<Post[]> {
   const db = await getDb();
-  const filter: Record<string, unknown> = { authorId: new ObjectId(authorId) };
-  if (!includeDrafts) filter.status = "published";
-  const docs = (await db
-    .collection<PostDoc>("posts")
-    .find(filter)
-    .sort({ publishedAt: -1 })
-    .toArray()) as DocWithId<PostDoc>[];
-  return docs.map(toPost);
+  const where: Prisma.PostWhereInput = { authorId };
+  if (!includeDrafts) where.status = "published";
+  const rows = await db.post.findMany({ where, orderBy: { publishedAt: "desc" } });
+  return rows.map(toPost);
 }
 
 /* ------------------------------ post editing ------------------------------- */
 
 export async function getPostForEdit(slug: string): Promise<Post | null> {
   const db = await getDb();
-  const doc = (await db
-    .collection<PostDoc>("posts")
-    .findOne({ slug })) as DocWithId<PostDoc> | null;
-  return doc ? toPost(doc) : null;
+  const row = await db.post.findUnique({ where: { slug } });
+  return row ? toPost(row) : null;
 }
 
 export async function slugExists(slug: string): Promise<boolean> {
   const db = await getDb();
-  const count = await db.collection("posts").countDocuments({ slug });
+  const count = await db.post.count({ where: { slug } });
   return count > 0;
 }
 
@@ -478,21 +500,21 @@ export async function createPostForUser(user: PublicUser, input: PostInput): Pro
   let i = 2;
   while (await slugExists(candidate)) candidate = `${slug}-${i++}`;
 
-  await db.collection<PostDoc>("posts").insertOne({
-    slug: candidate,
-    title: input.title,
-    excerpt: input.excerpt,
-    content: input.content,
-    tags: input.tags,
-    series: null,
-    status: input.status,
-    featured: false,
-    publishedAt: new Date(),
-    readingTime: readingTimeFa(input.content),
-    views: 0,
-    claps: 0,
-    authorId: new ObjectId(user.id),
-    author: { name: user.name, username: user.username },
+  await db.post.create({
+    data: {
+      slug: candidate,
+      title: input.title,
+      excerpt: input.excerpt,
+      content: input.content,
+      tags: input.tags,
+      status: input.status,
+      featured: false,
+      publishedAt: new Date(),
+      readingTime: readingTimeFa(input.content),
+      authorId: user.id,
+      authorName: user.name,
+      authorUsername: user.username,
+    },
   });
   return candidate;
 }
@@ -507,19 +529,17 @@ export async function updatePostForUser(
   if (!post) return "missing";
   if (user.role !== "admin" && post.authorId !== user.id) return "forbidden";
 
-  await db.collection<PostDoc>("posts").updateOne(
-    { slug },
-    {
-      $set: {
-        title: input.title,
-        excerpt: input.excerpt,
-        content: input.content,
-        tags: input.tags,
-        status: input.status,
-        readingTime: readingTimeFa(input.content),
-      },
+  await db.post.update({
+    where: { slug },
+    data: {
+      title: input.title,
+      excerpt: input.excerpt,
+      content: input.content,
+      tags: input.tags,
+      status: input.status,
+      readingTime: readingTimeFa(input.content),
     },
-  );
+  });
   return "ok";
 }
 
@@ -531,7 +551,7 @@ export async function deletePostForUser(
   const post = await getPostForEdit(slug);
   if (!post) return "missing";
   if (user.role !== "admin" && post.authorId !== user.id) return "forbidden";
-  await db.collection("posts").deleteOne({ slug });
+  await db.post.delete({ where: { slug } });
   return "ok";
 }
 
@@ -542,31 +562,17 @@ export async function getAuthorStats(authorId: string): Promise<{
   claps: number;
 }> {
   const db = await getDb();
-  const [agg] = await db
-    .collection("posts")
-    .aggregate<{
-      posts: number;
-      drafts: number;
-      views: number;
-      claps: number;
-    }>([
-      { $match: { authorId: new ObjectId(authorId) } },
-      {
-        $group: {
-          _id: null,
-          posts: { $sum: { $cond: [{ $eq: ["$status", "published"] }, 1, 0] } },
-          drafts: { $sum: { $cond: [{ $eq: ["$status", "draft"] }, 1, 0] } },
-          views: { $sum: "$views" },
-          claps: { $sum: "$claps" },
-        },
-      },
-    ])
-    .toArray();
+  const [agg, posts, drafts] = await Promise.all([
+    db.post.aggregate({ where: { authorId }, _sum: { views: true, claps: true } }),
+    db.post.count({ where: { authorId, status: "published" } }),
+    db.post.count({ where: { authorId, status: "draft" } }),
+  ]);
+
   return {
-    posts: agg?.posts ?? 0,
-    drafts: agg?.drafts ?? 0,
-    views: agg?.views ?? 0,
-    claps: agg?.claps ?? 0,
+    posts,
+    drafts,
+    views: agg._sum.views ?? 0,
+    claps: agg._sum.claps ?? 0,
   };
 }
 

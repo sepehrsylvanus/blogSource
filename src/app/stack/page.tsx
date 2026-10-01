@@ -20,7 +20,7 @@ export default async function StackPage() {
       <Reveal>
         <p className="flex items-center gap-2 font-mono text-xs tracking-[0.25em] text-faint" dir="ltr">
           <Radar className="size-3.5 text-ember" />
-          TECH RADAR — AGGREGATED LIVE FROM MONGODB
+          TECH RADAR — AGGREGATED LIVE FROM POSTGRES
         </p>
         <h1 className="mt-4 text-4xl font-black sm:text-5xl">رادار تکنولوژی</h1>
         <p className="mt-5 max-w-2xl leading-8 text-mute">
@@ -94,7 +94,7 @@ export default async function StackPage() {
         </Reveal>
         <div className="mt-8 grid gap-5 md:grid-cols-2">
           {projects.map((p, i) => (
-            <Reveal key={p._id} delay={(i % 2) * 0.08}>
+            <Reveal key={p.id} delay={(i % 2) * 0.08}>
               <div className="group flex h-full flex-col rounded-3xl border border-line bg-ink-2 p-6 transition-all hover:border-ember/40">
                 <div className="flex items-start justify-between gap-3">
                   <h3 className="font-mono text-lg font-bold text-paper" dir="ltr">{p.name}</h3>

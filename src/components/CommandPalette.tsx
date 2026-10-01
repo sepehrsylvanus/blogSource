@@ -188,7 +188,7 @@ export function CommandPalette({ posts }: { posts: PalettePost[] }) {
               </Command.List>
 
               <div className="flex items-center justify-between border-t border-line-soft px-4 py-2.5 font-mono text-[10px] text-faint">
-                <span dir="ltr">MongoDB regex search · debounced</span>
+                <span dir="ltr">PostgreSQL ILIKE search · debounced</span>
                 <span className="flex items-center gap-1">
                   <kbd className="rounded border border-line bg-ink px-1">↑↓</kbd> حرکت
                   <kbd className="rounded border border-line bg-ink px-1">↵</kbd> انتخاب

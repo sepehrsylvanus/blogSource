@@ -77,7 +77,7 @@ export function Footer() {
       </div>
       <div className="border-t border-line-soft">
         <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-3 px-5 py-5 font-mono text-[11px] text-faint">
-          <span dir="ltr">Next.js 16 · MongoDB · Tailwind 4 · Motion</span>
+          <span dir="ltr">Next.js 16 · PostgreSQL · Prisma · Tailwind 4</span>
           <span>ساخته شده با کنجکاوی — ۱۴۰۴</span>
         </div>
       </div>

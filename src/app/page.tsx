@@ -57,7 +57,7 @@ export default async function HomePage() {
             سانی‌ام؛ سازنده‌ی کانال یوتیوب
             <span className="font-mono text-ember-2" dir="ltr"> @sanidev-web</span>.
             این‌جا نسخه‌ی عمیق‌تر ویدیوهاست: با <b className="text-paper">گراف دانش</b>،
-            <b className="text-paper"> رادار تکنولوژی</b> و جستجوی زنده — همه با Next.js 16 و MongoDB.
+            <b className="text-paper"> رادار تکنولوژی</b> و جستجوی زنده — همه با Next.js 16 و PostgreSQL.
           </p>
         </Reveal>
         <Reveal delay={0.24}>

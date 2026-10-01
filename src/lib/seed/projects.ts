@@ -1,11 +1,11 @@
-import type { ProjectDoc, TechDoc } from "@/lib/types";
+import type { Prisma } from "@/generated/prisma/client";
 
-export const seedProjects: Omit<ProjectDoc, "_id">[] = [
+export const seedProjects: Prisma.ProjectCreateManyInput[] = [
   {
     name: "SaniBlog",
     tagline: "همین وبلاگی که داری می‌خوانی؛ باغ دیجیتال شخصی",
     year: 2026,
-    tech: ["Next.js", "React", "TypeScript", "MongoDB", "Tailwind CSS", "Motion"],
+    tech: ["Next.js", "React", "TypeScript", "PostgreSQL", "Prisma", "Tailwind CSS", "Motion"],
     url: null,
     highlight: "رندر سروری + گراف دانش + رادار تکنولوژی",
   },
@@ -59,7 +59,7 @@ export const seedProjects: Omit<ProjectDoc, "_id">[] = [
   },
 ];
 
-export const seedTechs: Omit<TechDoc, "_id">[] = [
+export const seedTechs: Prisma.TechCreateManyInput[] = [
   { name: "Next.js", category: "framework", ring: "adopt", note: "فریم‌ورک اصلی کانال؛ از نسخه‌ی ۱۳ تا ۱۶" },
   { name: "React", category: "framework", ring: "adopt", note: "پایه‌ی همه‌ی پروژه‌های UI" },
   { name: "TypeScript", category: "framework", ring: "adopt", note: "بدون تایپ دیگر کد نمی‌زنم" },
@@ -73,7 +73,7 @@ export const seedTechs: Omit<TechDoc, "_id">[] = [
   { name: "Expo", category: "framework", ring: "trial", note: "موبایل بدون دردسر نیتیو" },
   { name: "Socket.io", category: "data", ring: "trial", note: "ریل‌تایم سریع برای داشبوردها" },
   { name: "Redis", category: "data", ring: "trial", note: "کش و صف، هنوز دارم عمیق‌ترش می‌کنم" },
-  { name: "Prisma", category: "data", ring: "trial", note: "DX عالی برای SQL" },
+  { name: "Prisma", category: "data", ring: "adopt", note: "ORM پیش‌فرض پروژه‌ها؛ همین وبلاگ هم با آن کار می‌کند" },
   { name: "Three.js", category: "style", ring: "assess", note: "سه‌بعدی وب؛ سنگین ولی وسوسه‌انگیز" },
   { name: "Bun", category: "tool", ring: "assess", note: "ران‌تایم سریع؛ هنوز برای پروداکشن مطمئن نیستم" },
   { name: "Astro", category: "framework", ring: "assess", note: "برای سایت‌های محتوایی گزینه‌ی جذابی است" },

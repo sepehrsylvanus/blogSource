@@ -26,8 +26,8 @@ export const metadata: Metadata = {
     template: "%s — سانی‌.دِو",
   },
   description:
-    "وبلاگ فارسی توسعه‌ی وب: Next.js 16، MongoDB، ری‌اکت و تجربه‌های واقعی از ساختن. دور از کلیشه‌ی CRUD.",
-  keywords: ["nextjs", "react", "mongodb", "وبلاگ برنامه‌نویسی", "آموزش وب"],
+    "وبلاگ فارسی توسعه‌ی وب: Next.js 16، PostgreSQL، ری‌اکت و تجربه‌های واقعی از ساختن. دور از کلیشه‌ی CRUD.",
+  keywords: ["nextjs", "react", "postgresql", "prisma", "وبلاگ برنامه‌نویسی", "آموزش وب"],
   openGraph: {
     type: "website",
     locale: "fa_IR",
