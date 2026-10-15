@@ -1,0 +1,140 @@
+// Authentication models were generated with `npm run db:auth-gen` (Better Auth admin plugin).
+// Editorial models are defined below. If auth is regenerated, review the schema diff.
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  id            String    @id
+  name          String
+  email         String
+  emailVerified Boolean   @default(false)
+  image         String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  role          String?
+  banned        Boolean?  @default(false)
+  banReason     String?
+  banExpires    DateTime?
+  sessions      Session[]
+  accounts      Account[]
+  posts         Post[]
+
+  @@unique([email])
+  @@map("user")
+}
+
+model Session {
+  id             String   @id
+  expiresAt      DateTime
+  token          String
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  ipAddress      String?
+  userAgent      String?
+  userId         String
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  impersonatedBy String?
+
+  @@unique([token])
+  @@index([userId])
+  @@map("session")
+}
+
+model Account {
+  id                    String    @id
+  accountId             String
+  providerId            String
+  userId                String
+  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accessToken           String?
+  refreshToken          String?
+  idToken               String?
+  accessTokenExpiresAt  DateTime?
+  refreshTokenExpiresAt DateTime?
+  scope                 String?
+  password              String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  @@index([userId])
+  @@map("account")
+}
+
+model Verification {
+  id         String   @id
+  identifier String
+  value      String
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([identifier])
+  @@map("verification")
+}
+
+enum PostStatus {
+  draft
+  published
+  archived
+
+  @@map("post_status")
+}
+
+model Category {
+  id        String   @id @default(uuid()) @db.Uuid
+  name      String   @db.VarChar(100)
+  slug      String   @unique @db.VarChar(80)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  posts     Post[]
+
+  @@map("categories")
+}
+
+model Tag {
+  id       String    @id @default(uuid()) @db.Uuid
+  name     String    @db.VarChar(100)
+  slug     String    @unique @db.VarChar(80)
+  postTags PostTag[]
+
+  @@map("tags")
+}
+
+model Post {
+  id             String     @id @default(uuid()) @db.Uuid
+  authorId       String     @map("author_id")
+  author         User       @relation(fields: [authorId], references: [id], onDelete: Restrict)
+  categoryId     String?    @map("category_id") @db.Uuid
+  category       Category?  @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  title          String     @db.VarChar(180)
+  slug           String     @unique @db.VarChar(180)
+  excerpt        String     @db.VarChar(320)
+  body           String     @db.Text
+  status         PostStatus @default(draft)
+  coverPath      String?    @map("cover_path") @db.Text
+  seoTitle       String?    @map("seo_title") @db.VarChar(70)
+  seoDescription String?    @map("seo_description") @db.VarChar(160)
+  publishedAt    DateTime?  @map("published_at") @db.Timestamptz(6)
+  createdAt      DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime   @updatedAt @map("updated_at") @db.Timestamptz(6)
+  postTags       PostTag[]
+
+  @@index([status, publishedAt], map: "posts_status_published_idx")
+  @@index([categoryId], map: "posts_category_idx")
+  @@map("posts")
+}
+
+model PostTag {
+  postId String @map("post_id") @db.Uuid
+  post   Post   @relation(fields: [postId], references: [id], onDelete: Cascade)
+  tagId  String @map("tag_id") @db.Uuid
+  tag    Tag    @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([postId, tagId])
+  @@map("post_tags")
+}

@@ -1,9 +1,9 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  /* config options here */
-  cacheComponents: true,
-  partialPrefetching: true,
+  output: "standalone",
+  poweredByHeader: false,
+  // create-next-app 16.4 uses the Tailwind Turbopack loader by default.
   turbopack: {
     rules: {
       "*.css": {
