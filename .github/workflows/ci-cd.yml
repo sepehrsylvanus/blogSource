@@ -1,0 +1,136 @@
+name: Blog CI / GHCR / WSL
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - name: Generate Prisma Client from committed schema
+        run: npm run db:generate
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test
+      - name: Build with dummy values, never production secrets
+        env:
+          DATABASE_URL: postgresql://blog:build-only@127.0.0.1:5432/blog
+          BETTER_AUTH_SECRET: build-only-secret-not-for-use-in-production-1234567890
+          BETTER_AUTH_URL: http://localhost:3000
+          SITE_URL: http://localhost:3000
+          NEXT_TELEMETRY_DISABLED: "1"
+        run: npm run build
+
+  publish:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: ci
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image: ${{ steps.image.outputs.name }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Normalize GHCR package name to lowercase
+        id: image
+        shell: bash
+        run: echo "name=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@v3
+      - name: Log in to GHCR for publishing only
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and publish app image for this commit
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          target: runner
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.image.outputs.name }}:app-${{ github.sha }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Build and publish migrator image for this commit
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          target: migrator
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.image.outputs.name }}:migrator-${{ github.sha }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy:
+    # Unset at first push: publish GHCR first, test a manual WSL pull in chapter 28.
+    # Enable this Repository Variable only in chapter 31, after Tailscale/SSH work.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.WSL_DEPLOY_ENABLED == 'true'
+    needs: publish
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment: production
+    concurrency:
+      group: editorial-blog-production
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4 # Only the two deployment manifests are sent to WSL.
+      - name: Connect runner to private tailnet
+        uses: tailscale/github-action@v4
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:ci
+          ping: ${{ vars.DEPLOY_HOST }}
+      - name: Copy Compose/script only; pull the published GHCR images on WSL
+        env:
+          DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
+          IMAGE_BASE: ${{ needs.publish.outputs.image }}
+          DEPLOY_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test -n "$DEPLOY_HOST"
+          test -n "$DEPLOY_KEY"
+          test -n "$DEPLOY_KNOWN_HOSTS"
+          [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$IMAGE_BASE" =~ ^ghcr\.io/[a-z0-9][a-z0-9._-]*/[a-z0-9][a-z0-9._-]*$ ]]
+          install -d -m 700 "$HOME/.ssh"
+          printf '%s\n' "$DEPLOY_KEY" > "$HOME/.ssh/blog_deploy"
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/blog_deploy" "$HOME/.ssh/known_hosts"
+          ssh -T -i "$HOME/.ssh/blog_deploy" -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes -o ConnectTimeout=20 \
+            "deploy@${DEPLOY_HOST}" "install -d -m 700 /srv/blog/releases/${GITHUB_SHA}"
+          scp -q -i "$HOME/.ssh/blog_deploy" -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes -o ConnectTimeout=20 \
+            compose.prod.yml scripts/deploy.sh \
+            "deploy@${DEPLOY_HOST}:/srv/blog/releases/${GITHUB_SHA}/"
+          ssh -T -i "$HOME/.ssh/blog_deploy" -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes -o ConnectTimeout=20 \
+            "deploy@${DEPLOY_HOST}" \
+            "chmod 600 /srv/blog/releases/${GITHUB_SHA}/compose.prod.yml && chmod 700 /srv/blog/releases/${GITHUB_SHA}/deploy.sh && flock -w 600 /srv/blog/deploy.lock bash /srv/blog/releases/${GITHUB_SHA}/deploy.sh ${GITHUB_SHA} ${IMAGE_BASE}"
