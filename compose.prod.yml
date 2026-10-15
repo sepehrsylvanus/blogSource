@@ -1,5 +1,5 @@
 # Run ONLY against Ubuntu WSL's native Engine. Windows Docker Desktop runs compose.dev.yml.
-# Images are PUBLIC GHCR packages from the CI workflow; no Dockerfile or app source is needed here.
+# Images are published manually to PUBLIC GHCR from Windows; no Dockerfile or app source is needed here.
 # Export DEPLOY_SHA as the exact 40-character commit before using Compose directly.
 name: editorial-blog
 services:

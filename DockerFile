@@ -1,4 +1,4 @@
-# GitHub Actions builds the runner and migrator images and publishes both to GHCR.
+# Build both targets on Windows with Docker Desktop and push them to public GHCR.
 # Ubuntu WSL never builds from source: its native Docker Engine only pulls the images.
 # Prisma CLI (generation and migrations) needs OpenSSL in Debian slim images.
 FROM node:22-bookworm-slim AS base

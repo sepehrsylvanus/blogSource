@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 umask 077
 
-# Only deployment manifests live in Ubuntu WSL; app and migrator images come from public GHCR.
+# Only deployment manifests live in Ubuntu WSL; pull the images published from Windows to public GHCR.
 TARGET="${1:-}"
 EXPECTED_IMAGE="${2:-}"
 [[ "$TARGET" =~ ^[0-9a-f]{40}$ ]] || { echo "Expected a 40-character commit SHA" >&2; exit 2; }
