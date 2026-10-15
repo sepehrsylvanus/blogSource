@@ -1,11 +1,16 @@
-# Build and run on the same Linux architecture. Development stays on Windows in VS Code;
-# these images are built only during deployment from Ubuntu WSL (Docker Desktop daemon).
-FROM node:22-bookworm-slim AS deps
+# GitHub Actions builds the runner and migrator images and publishes both to GHCR.
+# Ubuntu WSL never builds from source: its native Docker Engine only pulls the images.
+# Prisma CLI (generation and migrations) needs OpenSSL in Debian slim images.
+FROM node:22-bookworm-slim AS base
+RUN apt-get update && apt-get install -y --no-install-recommends openssl ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+FROM base AS deps
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci
 
-FROM node:22-bookworm-slim AS builder
+FROM base AS builder
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
@@ -17,7 +22,7 @@ RUN DATABASE_URL=postgresql://blog:build-only@127.0.0.1:5432/blog \
     BETTER_AUTH_URL=http://localhost:3000 SITE_URL=http://localhost:3000 \
     npm run build
 
-FROM node:22-bookworm-slim AS migrator
+FROM base AS migrator
 WORKDIR /app
 ENV NODE_ENV=production
 COPY --from=deps /app/node_modules ./node_modules
@@ -25,7 +30,8 @@ COPY package.json package-lock.json tsconfig.json prisma.config.ts ./
 COPY prisma ./prisma
 # Better Auth admin CLI imports src/lib/auth.ts; Prisma Client is generated at build.
 COPY src ./src
-RUN npm run db:generate
+# Generation never connects to a database; keep the real URL out of the public image.
+RUN DATABASE_URL=postgresql://blog:build-only@127.0.0.1:5432/blog npm run db:generate
 CMD ["npm", "run", "db:deploy"]
 
 FROM node:22-bookworm-slim AS runner
