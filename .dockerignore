@@ -1,0 +1,12 @@
+node_modules
+.next
+.git
+src/generated/prisma
+prisma/auth.generated.prisma
+.env*
+!.env.example
+.uploads
+coverage
+*.log
+README.md
+AGENTS.md

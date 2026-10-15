@@ -1,0 +1,69 @@
+name: editorial-blog
+services:
+  db:
+    image: postgres:17-bookworm
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: blog
+      POSTGRES_DB: blog
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in env file}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U blog -d blog"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    networks: [internal]
+
+  migrate:
+    build:
+      context: .
+      target: migrator
+    environment:
+      DATABASE_URL: ${DATABASE_URL:?set DATABASE_URL in env file}
+      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?set BETTER_AUTH_SECRET in env file}
+      BETTER_AUTH_URL: ${APP_URL:?set APP_URL in env file}
+    depends_on:
+      db: { condition: service_healthy }
+    profiles: [tools]
+    networks: [internal]
+
+  app:
+    image: editorial-blog:current
+    build:
+      context: .
+      target: runner
+    restart: unless-stopped
+    init: true
+    environment:
+      DATABASE_URL: ${DATABASE_URL:?set DATABASE_URL in env file}
+      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?set BETTER_AUTH_SECRET in env file}
+      BETTER_AUTH_URL: ${APP_URL:?set APP_URL in env file}
+      SITE_URL: ${APP_URL:?set APP_URL in env file}
+      UPLOAD_DIR: /data/uploads
+    volumes:
+      - /srv/blog/data/uploads:/data/uploads
+    ports:
+      # Different from the VS Code dev server (:3000) on this same Windows PC.
+      - "127.0.0.1:3100:3000"
+    depends_on:
+      db: { condition: service_healthy }
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "require('http').get('http://127.0.0.1:3000/api/health',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 35s
+    networks: [internal]
+
+networks:
+  internal:
+volumes:
+  pgdata:

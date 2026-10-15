@@ -1,0 +1,41 @@
+# Build and run on the same Linux architecture. Development stays on Windows in VS Code;
+# these images are built only during deployment from Ubuntu WSL (Docker Desktop daemon).
+FROM node:22-bookworm-slim AS deps
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci
+
+FROM node:22-bookworm-slim AS builder
+WORKDIR /app
+COPY --from=deps /app/node_modules ./node_modules
+COPY . .
+ENV NEXT_TELEMETRY_DISABLED=1
+# Prisma Client is generated at build time. These are PUBLICLY SAFE dummy values;
+# the real DATABASE_URL and auth secret are injected into running containers.
+RUN DATABASE_URL=postgresql://blog:build-only@127.0.0.1:5432/blog \
+    BETTER_AUTH_SECRET=build-only-secret-not-for-use-in-production-1234567890 \
+    BETTER_AUTH_URL=http://localhost:3000 SITE_URL=http://localhost:3000 \
+    npm run build
+
+FROM node:22-bookworm-slim AS migrator
+WORKDIR /app
+ENV NODE_ENV=production
+COPY --from=deps /app/node_modules ./node_modules
+COPY package.json package-lock.json tsconfig.json prisma.config.ts ./
+COPY prisma ./prisma
+# Better Auth admin CLI imports src/lib/auth.ts; Prisma Client is generated at build.
+COPY src ./src
+RUN npm run db:generate
+CMD ["npm", "run", "db:deploy"]
+
+FROM node:22-bookworm-slim AS runner
+WORKDIR /app
+ENV NODE_ENV=production NEXT_TELEMETRY_DISABLED=1 PORT=3000 HOSTNAME=0.0.0.0
+RUN groupadd --system --gid 10001 blog && useradd --system --uid 10001 --gid blog blog
+COPY --from=builder --chown=blog:blog /app/.next/standalone ./
+COPY --from=builder --chown=blog:blog /app/.next/static ./.next/static
+COPY --from=builder --chown=blog:blog /app/public ./public
+RUN mkdir -p /app/.next /data/uploads && chown -R blog:blog /app/.next /data/uploads
+USER blog
+EXPOSE 3000
+CMD ["node", "server.js"]
