@@ -1,0 +1,31 @@
+# --- rebuild inside the image, never copied from the host ---
+node_modules
+.next
+out
+build
+coverage
+*.tsbuildinfo
+
+# --- VCS / editor / local junk ---
+.git
+.gitignore
+.github
+.vscode
+.DS_Store
+*.log
+.uploads
+
+# --- tests and docs are not needed to build the image ---
+tests
+README.md
+STRUCTURE.md
+AGENTS.md
+
+# --- docker itself ---
+Dockerfile
+.dockerignore
+
+# --- other env files; NOTE: .env itself is intentionally NOT ignored,
+#     it is baked into the image so `docker run` needs no -e flags ---
+.env.local
+.env.*.local
